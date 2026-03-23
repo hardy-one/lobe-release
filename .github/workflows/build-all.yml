@@ -23,29 +23,33 @@ env:
 
 jobs:
   # ============================================================
-  # Job 1: 构建 Docker 镜像
+  # Job 1: 构建 Docker 镜像（保留你的流程）
   # ============================================================
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
     
     steps:
+      # 1. 拉取源代码（升级到 v6）
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: hardy-one/lobehub
           ref: next
           path: lobe-chat-src
 
+      # 2. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 3. 登录 Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # 4. 构建并推送 Docker 镜像
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -62,6 +66,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # 5. 输出构建结果
       - name: Docker build completed
         run: |
           echo "============================================================"
@@ -73,75 +78,94 @@ jobs:
           echo "============================================================"
 
   # ============================================================
-  # Job 2: 构建 Windows 桌面应用
+  # Job 2: 构建 Windows 桌面应用（采用官方流程）
   # ============================================================
   build-windows:
     name: Build Windows Desktop
-    runs-on: windows-latest
+    runs-on: windows-2025
     
     steps:
-      # 1. 拉取源代码
+      # 1. 拉取源代码（官方：checkout@v6 + fetch-depth: 0）
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: hardy-one/lobehub
           ref: next
           path: lobe-chat-src
+          fetch-depth: 0
 
-      # 2. 设置 Node.js
+      # 2. 设置 Node.js（官方：setup-node@v6 + package-manager-cache: false）
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
 
-      # 3. 安装 Bun（项目使用 Bun 包管理器）
+      # 3. 安装 Bun（官方：setup-bun@v2）
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      # 4. 安装依赖（使用 Bun 避免 npm 警告）
+      # 4. 安装依赖（官方：bun i）
       - name: Install dependencies
         working-directory: lobe-chat-src
-        run: bun install
+        run: bun i
 
-      # 5. 设置版本号
-      - name: Set version
+      # 5. 设置版本号（官方：workflow:set-desktop-version）
+      - name: Set package version
+        working-directory: lobe-chat-src
+        run: bunx npm run workflow:set-desktop-version ${{ github.run_number }} canary
+
+      # 6. Windows 构建前清理（官方流程）
+      - name: Clean previous build artifacts (Windows)
         working-directory: lobe-chat-src
         run: |
-          $version = "$(Get-Date -Format 'yyyy.M.d')"
-          $buildNumber = "${{ github.run_number }}"
-          $fullVersion = "$version.$buildNumber"
-          bunx npm version $fullVersion --no-git-tag-version
-          echo "Built version: $fullVersion"
-
-      # 6. 构建 Windows 桌面应用（使用正确的脚本名）
-      - name: Build Windows App
-        working-directory: lobe-chat-src
-        run: bun run desktop:build:all
+          Remove-Item -Path apps\desktop\release -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path apps\desktop\dist -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path C:\temp -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -Path C:\temp -ItemType Directory -Force
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEMP: C:\temp
+          TMP: C:\temp
 
-      # 7. 打包 Windows 安装程序（使用正确的脚本名）
-      - name: Package Windows App
+      # 7. 构建并打包 Windows 应用（官方：desktop:package:app + 完整环境变量）
+      - name: Build artifact on Windows
         working-directory: lobe-chat-src
-        run: bun run desktop:package:all
+        run: bun run desktop:package:app
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          UPDATE_CHANNEL: canary
+          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          APP_URL: http://localhost:3015
+          DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
+          KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
+          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_DESKTOP_PROJECT_ID }}
+          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL }}
+          TEMP: C:\temp
+          TMP: C:\temp
 
       # 8. 显示构建产物
-      - name: Show build artifacts
+      - name: List final artifacts
+        working-directory: lobe-chat-src
         run: |
           echo "============================================================"
           echo "  构建产物列表"
           echo "============================================================"
-          Get-ChildItem -Path lobe-chat-src\dist -Recurse -File | Select-Object Name, Length, LastWriteTime
-          Get-ChildItem -Path lobe-chat-src\release -Recurse -File | Select-Object Name, Length, LastWriteTime -ErrorAction SilentlyContinue
+          Get-ChildItem -Path apps\desktop\dist -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
+          Get-ChildItem -Path apps\desktop\release -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
           echo "============================================================"
 
-      # 9. 上传到 GitHub Release
+      # 9. 上传构建产物（官方：upload-artifact@v6）
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-windows
+          path: |
+            lobe-chat-src/apps/desktop/dist/
+            lobe-chat-src/apps/desktop/release/
+          retention-days: 3
+
+      # 10. 创建 GitHub Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -163,17 +187,20 @@ jobs:
             ### 📦 安装
             下载 `.exe` 文件运行安装
           files: |
-            lobe-chat-src/dist/*.exe
-            lobe-chat-src/dist/*.msi
-            lobe-chat-src/release/*.exe
-            lobe-chat-src/release/*.msi
-          draft: false
-          prerelease: true
+            lobe-chat-src/apps/desktop/dist/latest*
+            lobe-chat-src/apps/desktop/dist/*.exe*
+            lobe-chat-src/apps/desktop/dist/*.msi
+            lobe-chat-src/apps/desktop/dist/*.zip*
+            lobe-chat-src/apps/desktop/release/latest*
+            lobe-chat-src/apps/desktop/release/*.exe*
+            lobe-chat-src/apps/desktop/release/*.msi
+            lobe-chat-src/apps/desktop/release/*.zip*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 10. 构建完成输出
+      # 11. 构建完成输出
       - name: Windows build completed
+        working-directory: lobe-chat-src
         run: |
           echo "============================================================"
           echo "  🪟 Windows 构建完成！"
