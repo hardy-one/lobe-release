@@ -30,7 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # 1. 拉取源代码
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
@@ -38,18 +37,15 @@ jobs:
           ref: next
           path: lobe-chat-src
 
-      # 2. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. 登录 Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 4. 构建并推送 Docker 镜像
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -63,10 +59,9 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag }}
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type:gha
+          cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 5. 输出构建结果
       - name: Docker build completed
         run: |
           echo "============================================================"
@@ -83,7 +78,6 @@ jobs:
   build-windows:
     name: Build Windows Desktop
     runs-on: windows-latest
-    # 👆 没有 needs 依赖，与 Docker 并行构建
     
     steps:
       # 1. 拉取源代码
@@ -94,53 +88,60 @@ jobs:
           ref: next
           path: lobe-chat-src
 
-      # 2. 设置 Node.js 环境
+      # 2. 设置 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      # 3. 安装依赖
+      # 3. 安装 Bun（项目使用 Bun 包管理器）
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # 4. 安装依赖（使用 Bun 避免 npm 警告）
       - name: Install dependencies
         working-directory: lobe-chat-src
-        run: |
-          npm install -g bun
-          bun install
+        run: bun install
 
-      # 4. 设置版本号
+      # 5. 设置版本号
       - name: Set version
         working-directory: lobe-chat-src
         run: |
           $version = "$(Get-Date -Format 'yyyy.M.d')"
           $buildNumber = "${{ github.run_number }}"
           $fullVersion = "$version.$buildNumber"
-          npm version $fullVersion --no-git-tag-version
+          bunx npm version $fullVersion --no-git-tag-version
           echo "Built version: $fullVersion"
 
-      # 5. 构建 Windows 桌面应用
+      # 6. 构建 Windows 桌面应用（使用正确的脚本名）
       - name: Build Windows App
         working-directory: lobe-chat-src
-        run: npm run desktop:build
+        run: bun run desktop:build:all
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 6. 打包 Windows 安装程序
+      # 7. 打包 Windows 安装程序（使用正确的脚本名）
       - name: Package Windows App
         working-directory: lobe-chat-src
-        run: npm run desktop:package
+        run: bun run desktop:package:all
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
-      # 7. 显示构建产物
+      # 8. 显示构建产物
       - name: Show build artifacts
         run: |
           echo "============================================================"
           echo "  构建产物列表"
           echo "============================================================"
           Get-ChildItem -Path lobe-chat-src\dist -Recurse -File | Select-Object Name, Length, LastWriteTime
+          Get-ChildItem -Path lobe-chat-src\release -Recurse -File | Select-Object Name, Length, LastWriteTime -ErrorAction SilentlyContinue
           echo "============================================================"
 
-      # 8. 上传到 GitHub Release
+      # 9. 上传到 GitHub Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -164,12 +165,14 @@ jobs:
           files: |
             lobe-chat-src/dist/*.exe
             lobe-chat-src/dist/*.msi
+            lobe-chat-src/release/*.exe
+            lobe-chat-src/release/*.msi
           draft: false
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 9. 构建完成输出
+      # 10. 构建完成输出
       - name: Windows build completed
         run: |
           echo "============================================================"
