@@ -79,16 +79,17 @@ jobs:
           ref: ${{ env.SOURCE_BRANCH }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4  # ✅ 升级到 v4
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v4  # ✅ 升级到 v4
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # ✅ 升级到 v7 (Node.js 24)
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6  # ✅ 升级到 v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -168,76 +169,66 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 🔍 诊断：找出所有 exe/msi/zip 文件
-      - name: Find all build artifacts
+      # 🔍 查找并显示主安装程序
+      - name: Find setup executable
+        id: setup_file
         shell: pwsh
         run: |
           Write-Host "============================================================"
-          Write-Host "  🔍 搜索构建产物..."
+          Write-Host "  查找主安装程序..."
           Write-Host "============================================================"
           
-          Write-Host ""
-          Write-Host "=== 当前目录 ==="
-          Get-ChildItem -Force | Select-Object Name, Length | Format-Table
-        
-          Write-Host ""
-          Write-Host "=== 所有 .exe 文件 ==="
-          $exeFiles = Get-ChildItem -Path . -Filter *.exe -Recurse -ErrorAction SilentlyContinue
-          if ($exeFiles) {
-            $exeFiles | Select-Object FullName, Length | Format-Table
-          } else {
-            Write-Host "未找到 .exe 文件"
-          }
+          # 查找 *-setup.exe 文件
+          $setupFile = Get-ChildItem -Path release -Filter "*-setup.exe" -File | Select-Object -First 1
           
-          Write-Host ""
-          Write-Host "=== 所有 .msi 文件 ==="
-          $msiFiles = Get-ChildItem -Path . -Filter *.msi -Recurse -ErrorAction SilentlyContinue
-          if ($msiFiles) {
-            $msiFiles | Select-Object FullName, Length | Format-Table
+          if ($setupFile) {
+            Write-Host "✅ 找到主安装程序：$($setupFile.Name)"
+            Write-Host "   完整路径：$($setupFile.FullName)"
+            Write-Host "   文件大小：$([math]::Round($setupFile.Length / 1MB, 2)) MB"
+            
+            # 输出文件名供后续步骤使用
+            echo "filename=$($setupFile.Name)" >> $env:GITHUB_OUTPUT
           } else {
-            Write-Host "未找到 .msi 文件"
-          }
-          
-          Write-Host ""
-          Write-Host "=== 所有 .zip 文件 ==="
-          $zipFiles = Get-ChildItem -Path . -Filter *.zip -Recurse -ErrorAction SilentlyContinue
-          if ($zipFiles) {
-            $zipFiles | Select-Object FullName, Length | Format-Table
-          } else {
-            Write-Host "未找到 .zip 文件"
+            Write-Host "❌ 未找到 *-setup.exe 文件！"
+            Write-Host "release 目录内容："
+            Get-ChildItem -Path release -File | Select-Object Name, Length
+            echo "filename=" >> $env:GITHUB_OUTPUT
           }
           
           Write-Host "============================================================"
 
-      # 📦 上传所有找到的文件
+      # 📦 上传完整的 release 目录作为 artifact
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
-          path: |
-            **/*.exe
-            **/*.msi
-            **/*.zip
+          path: release/
           retention-days: 3
-          if-no-files-found: warn
 
-      # 🎯 创建 Release（使用动态路径）
+      # 🎯 创建 Release（只上传主安装程序）
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
           name: ${{ needs.calculate-version.outputs.tag }}
           body: ""
-          files: |
-            **/*.exe
-            **/*.msi
-            **/*.zip
-          fail_on_unmatched_files: false
+          # ✅ 只上传 *-setup.exe 文件
+          files: release/*-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Windows build completed
+        shell: pwsh
         run: |
           Write-Host "============================================================"
           Write-Host "  Windows 构建完成！"
+          Write-Host "============================================================"
+          Write-Host "版本：${{ needs.calculate-version.outputs.tag }}"
+          Write-Host "源码：${{ env.SOURCE_REPO }}@${{ env.SOURCE_BRANCH }}"
+          Write-Host ""
+          if (Test-Path "release/*-setup.exe") {
+            $setupFile = Get-ChildItem -Path "release" -Filter "*-setup.exe" | Select-Object -First 1
+            Write-Host "✅ 主安装程序：$($setupFile.Name)"
+          }
+          Write-Host "Release 地址：https://github.com/${{ github.repository }}/releases"
           Write-Host "============================================================"
