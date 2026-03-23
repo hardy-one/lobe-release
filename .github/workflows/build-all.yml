@@ -40,57 +40,41 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     
     steps:
-      # 步骤 1: 如果手动指定版本号，直接使用
       - name: Use manual version
         if: ${{ inputs.version != '' && inputs.version != null }}
         id: version_manual
         run: |
           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
           echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
-          echo "✅ Using manual version: ${{ inputs.version }}"
 
-      # 步骤 2: 否则使用 GitHub API 获取最新 tag
       - name: Get latest tag via GitHub API
         if: ${{ inputs.version == '' || inputs.version == null }}
         id: version_auto
         run: |
-          echo "🔍 Fetching tags from ${{ env.SOURCE_REPO }} via GitHub API..."
-          
-          # 使用 GitHub API 获取 tags
           response=$(curl -s "https://api.github.com/repos/${{ env.SOURCE_REPO }}/tags?per_page=100")
-          
-          # 解析第一个稳定版本 tag (格式：vX.Y.Z)
           latest_tag=$(echo "$response" | grep -oE '"name":\s*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/v\1/')
           
           if [ -z "$latest_tag" ]; then
-            # 没有 tag 时使用日期版本
             version="$(date +%Y.%m.%d).${{ github.run_number }}"
-            echo "⚠️ No stable tag found, using date version: ${version}"
           else
-            # 基于最新 tag 计算 (v2.1.28 → 2.1.29)
             base_version="${latest_tag#v}"
             IFS='.' read -r major minor patch <<< "$base_version"
             new_patch=$((patch + 1))
             version="${major}.${minor}.${new_patch}"
-            echo "📌 Latest tag: $latest_tag → New version: ${version}"
           fi
           
           echo "version=${version}" >> $GITHUB_OUTPUT
           echo "tag=v${version}" >> $GITHUB_OUTPUT
-          echo "✅ Version calculation complete"
 
-      # 步骤 3: 合并输出
       - name: Set version output
         id: version
         run: |
           if [ -n "${{ steps.version_manual.outputs.version }}" ]; then
             echo "version=${{ steps.version_manual.outputs.version }}" >> $GITHUB_OUTPUT
             echo "tag=${{ steps.version_manual.outputs.tag }}" >> $GITHUB_OUTPUT
-            echo "✅ Using manual version"
           else
             echo "version=${{ steps.version_auto.outputs.version }}" >> $GITHUB_OUTPUT
             echo "tag=${{ steps.version_auto.outputs.tag }}" >> $GITHUB_OUTPUT
-            echo "✅ Using auto-calculated version"
           fi
 
   # ============================================================
@@ -102,13 +86,11 @@ jobs:
     needs: [calculate-version]
     
     steps:
-      # 关键：checkout 到 RUNNER_WORKSPACE（默认根目录）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_BRANCH }}
-          # 没有 path，直接到 ${{ github.workspace }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -146,7 +128,7 @@ jobs:
           echo "============================================================"
 
   # ============================================================
-  # Job 3: 构建 Windows 桌面应用（完全模拟官方流程）
+  # Job 3: 构建 Windows 桌面应用
   # ============================================================
   build-windows:
     name: Build Windows Desktop
@@ -154,7 +136,7 @@ jobs:
     needs: [calculate-version]
     
     steps:
-      # 1. 拉取源代码到根目录（关键：没有 path）
+      # 1. 拉取源代码
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
@@ -169,12 +151,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
-      # 3. 安装 pnpm（会自动从 package.json 读取 version）
+      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
-          # 不指定 version，自动从 package.json 的 packageManager 读取
 
       # 4. 安装根目录依赖
       - name: Install dependencies (root)
@@ -225,29 +206,65 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 10. 显示构建产物
-      - name: List final artifacts
+      # 10. 🔍 诊断：显示所有构建产物（关键步骤）
+      - name: Find all build artifacts
         run: |
           echo "============================================================"
-          echo "  构建产物列表"
+          echo "  🔍 搜索所有可能的构建产物..."
           echo "============================================================"
-          Get-ChildItem -Path apps\desktop\dist -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
-          Get-ChildItem -Path apps\desktop\release -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
+          
+          echo ""
+          echo "=== 根目录结构 ==="
+          ls -la
+          
+          echo ""
+          echo "=== apps 目录 ==="
+          ls -la apps/ 2>/dev/null || echo "apps/ 不存在"
+          
+          echo ""
+          echo "=== apps/desktop 目录 ==="
+          ls -la apps/desktop/ 2>/dev/null || echo "apps/desktop/ 不存在"
+          
+          echo ""
+          echo "=== dist 目录（如果有）==="
+          find . -type d -name "dist" 2>/dev/null | head -20
+          
+          echo ""
+          echo "=== release 目录（如果有）==="
+          find . -type d -name "release" 2>/dev/null | head -20
+          
+          echo ""
+          echo "=== .exe 文件 ==="
+          find . -name "*.exe" -type f 2>/dev/null | head -20
+          
+          echo ""
+          echo "=== .msi 文件 ==="
+          find . -name "*.msi" -type f 2>/dev/null | head -20
+          
+          echo ""
+          echo "=== .zip 文件 ==="
+          find . -name "*.zip" -type f 2>/dev/null | head -20
+          
           echo "============================================================"
 
-      # 11. 上传构建产物
+      # 11. 上传构建产物（使用动态路径）
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
           path: |
-            apps/desktop/dist/
-            apps/desktop/release/
+            **/dist/**/*.exe
+            **/dist/**/*.msi
+            **/dist/**/*.zip
+            **/release/**/*.exe
+            **/release/**/*.msi
+            **/release/**/*.zip
           retention-days: 3
+          if-no-files-found: warn
 
       # 12. 创建 GitHub Release
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
           name: 'Windows Build ${{ needs.calculate-version.outputs.tag }}'
@@ -264,18 +281,15 @@ jobs:
             ### ⚠️ 注意事项
             - 自动构建版本，仅供测试
             - 请备份数据后使用
-
-            ### 📦 安装
-            下载 `.exe` 文件运行安装
           files: |
-            apps/desktop/dist/latest*
-            apps/desktop/dist/*.exe*
-            apps/desktop/dist/*.msi
-            apps/desktop/dist/*.zip*
-            apps/desktop/release/latest*
-            apps/desktop/release/*.exe*
-            apps/desktop/release/*.msi
-            apps/desktop/release/*.zip*
+            **/dist/*.exe
+            **/dist/*.msi
+            **/dist/*.zip
+            **/release/*.exe
+            **/release/*.msi
+            **/release/*.zip
+          fail_on_unmatched_files: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
