@@ -172,8 +172,8 @@ jobs:
           Write-Host "============================================================"
           Write-Host "  release 目录内容"
           Write-Host "============================================================"
-          if (Test-Path release) {
-            Get-ChildItem -Path release -File | Format-Table Name, Length -AutoSize
+          if (Test-Path apps/desktop/release) {
+            Get-ChildItem -Path apps/desktop/release -File | Format-Table Name, Length -AutoSize
           } else {
             Write-Host "❌ release 目录不存在！"
           }
@@ -184,7 +184,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
-          path: release/
+          path: apps/desktop/release/
           retention-days: 3
 
       # 11. 创建 Release（只上传 setup.exe）
@@ -194,6 +194,6 @@ jobs:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
           name: ${{ needs.calculate-version.outputs.tag }}
           body: ""
-          files: release/*-setup.exe
+          files: apps/desktop/release/*-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
