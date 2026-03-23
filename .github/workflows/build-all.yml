@@ -1,0 +1,180 @@
+name: Build LobeChat (Docker + Windows)
+
+# ============================================
+# 仅手动触发
+# ============================================
+on:
+  workflow_dispatch:
+    inputs:
+      docker_tag:
+        description: 'Docker tag (e.g., latest, dev)'
+        required: false
+        type: string
+        default: 'latest'
+      
+      release_notes:
+        description: 'Release notes (optional)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '24.11.1'
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
+
+jobs:
+  # ============================================================
+  # Job 1: 构建 Docker 镜像
+  # ============================================================
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 拉取源代码
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          repository: hardy-one/lobehub
+          ref: next
+          path: lobe-chat-src
+
+      # 2. 设置 Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 3. 登录 Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 4. 构建并推送 Docker 镜像
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: lobe-chat-src
+          file: lobe-chat-src/Dockerfile
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_ENABLE_BETTER_AUTH=1
+            NEXT_PUBLIC_ENABLE_NEXT_AUTH=0
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type:gha
+          cache-to: type=gha,mode=max
+
+      # 5. 输出构建结果
+      - name: Docker build completed
+        run: |
+          echo "============================================================"
+          echo "  🐳 Docker 构建完成！"
+          echo "============================================================"
+          echo "镜像标签:"
+          echo " - ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag }}"
+          echo " - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "============================================================"
+
+  # ============================================================
+  # Job 2: 构建 Windows 桌面应用
+  # ============================================================
+  build-windows:
+    name: Build Windows Desktop
+    runs-on: windows-latest
+    # 👆 没有 needs 依赖，与 Docker 并行构建
+    
+    steps:
+      # 1. 拉取源代码
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          repository: hardy-one/lobehub
+          ref: next
+          path: lobe-chat-src
+
+      # 2. 设置 Node.js 环境
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        working-directory: lobe-chat-src
+        run: |
+          npm install -g bun
+          bun install
+
+      # 4. 设置版本号
+      - name: Set version
+        working-directory: lobe-chat-src
+        run: |
+          $version = "$(Get-Date -Format 'yyyy.M.d')"
+          $buildNumber = "${{ github.run_number }}"
+          $fullVersion = "$version.$buildNumber"
+          npm version $fullVersion --no-git-tag-version
+          echo "Built version: $fullVersion"
+
+      # 5. 构建 Windows 桌面应用
+      - name: Build Windows App
+        working-directory: lobe-chat-src
+        run: npm run desktop:build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 6. 打包 Windows 安装程序
+      - name: Package Windows App
+        working-directory: lobe-chat-src
+        run: npm run desktop:package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 7. 显示构建产物
+      - name: Show build artifacts
+        run: |
+          echo "============================================================"
+          echo "  构建产物列表"
+          echo "============================================================"
+          Get-ChildItem -Path lobe-chat-src\dist -Recurse -File | Select-Object Name, Length, LastWriteTime
+          echo "============================================================"
+
+      # 8. 上传到 GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: windows-${{ github.sha }}
+          name: 'Windows Build ${{ github.run_number }}'
+          body: |
+            ## 🪟 Windows Desktop Build
+
+            - **Commit**: ${{ github.sha }}
+            - **Build Number**: ${{ github.run_number }}
+            - **Branch**: ${{ github.ref_name }}
+
+            ${{ inputs.release_notes && format('### 📝 更新说明\n{0}', inputs.release_notes) || '' }}
+
+            ### ⚠️ 注意事项
+            - 自动构建版本，仅供测试
+            - 请备份数据后使用
+
+            ### 📦 安装
+            下载 `.exe` 文件运行安装
+          files: |
+            lobe-chat-src/dist/*.exe
+            lobe-chat-src/dist/*.msi
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 9. 构建完成输出
+      - name: Windows build completed
+        run: |
+          echo "============================================================"
+          echo "  🪟 Windows 构建完成！"
+          echo "============================================================"
+          echo "Release 地址:"
+          echo " https://github.com/${{ github.repository }}/releases"
+          echo "============================================================"
