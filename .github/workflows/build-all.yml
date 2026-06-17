@@ -216,6 +216,6 @@ jobs:
           files: |
             apps/desktop/release/*-setup.exe
             apps/desktop/release/latest*.yml 
-          prerelease: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
