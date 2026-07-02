@@ -164,12 +164,12 @@ jobs:
 
       # ✅ 设置版本号（格式：X.Y.Z-hardy.N）
       - name: Set package version
-        run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} hardy
+        run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} Hardy
 
       - name: Build Windows App
         run: npm run desktop:package:app
         env:
-          UPDATE_CHANNEL: hardy
+          UPDATE_CHANNEL: Hardy
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
