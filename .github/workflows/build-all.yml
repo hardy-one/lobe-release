@@ -141,7 +141,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
@@ -201,7 +201,7 @@ jobs:
 
       # ✅ 更新 action 版本到 v2.6.1（支持 Node.js 24）
       - name: Create Release
-        uses: softprops/action-gh-release@v2.6.1
+        uses: softprops/action-gh-release@v3.0.2
         with:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
           name: ${{ needs.calculate-version.outputs.tag }}
