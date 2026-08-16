@@ -14,11 +14,17 @@ on:
         required: false
         type: string
 
+      source_branch:
+        description: '选择要构建的分支：next、canary，或输入其他分支名'
+        required: false
+        default: 'next'
+        type: string
+
 env:
   NODE_VERSION: '24.11.1'
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
   SOURCE_REPO: hardy-one/lobehub
-  SOURCE_BRANCH: next
+  SOURCE_BRANCH: ${{ github.event.inputs.source_branch || 'next' }}
 
 jobs:
   calculate-version:
