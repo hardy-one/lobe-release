@@ -216,12 +216,258 @@ jobs:
 
             > Custom build from `${{ env.SOURCE_BRANCH }}` branch of `${{ env.SOURCE_REPO }}`.
 
+            ### 🖥️ Platforms
+            Windows `*-setup.exe` · macOS arm64 `*.dmg` / `*.zip` · Linux `*.AppImage` / `*.deb` / `*.rpm` / `*.snap` / `*.tar.gz`
+            （实际产物取决于各平台构建结果）
+
             ### ⚠️ Important Notes
             - This is a custom hardy build and is NOT intended for production use.
             - May contain unstable or incomplete changes. Use at your own risk.
+            - macOS 产物未签名、未公证：首次打开请「右键 → 打开」，或执行
+              `xattr -dr com.apple.quarantine "/Applications/LobeHub-Hardy.app"`。
+            - Linux 自动更新仅对 AppImage 生效，其他格式请手动重装。
           files: |
             apps/desktop/release/*-setup.exe
             apps/desktop/release/latest*.yml 
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # macOS 桌面端（Apple Silicon / arm64，GitHub Hosted Runner）
+  # ============================================================
+  build-macos:
+    name: Build macOS Desktop
+    runs-on: macos-15
+    needs: [calculate-version]
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: pnpm install --node-linker=hoisted
+
+      - name: Remove China electron mirror
+        shell: bash
+        run: |
+          if [ -f "./apps/desktop/.npmrc" ]; then
+            sed -i.bak '/^electron_mirror=/d; /^electron_builder_binaries_mirror=/d' "./apps/desktop/.npmrc"
+            rm -f "./apps/desktop/.npmrc.bak"
+          fi
+
+      - name: Install deps on Desktop
+        run: npm run install-isolated --prefix=./apps/desktop
+
+      # 清理构建残留，规避 electron-builder 在 macOS 上的 hdiutil 问题
+      # https://github.com/electron-userland/electron-builder/issues/8415
+      - name: Clean previous build artifacts
+        run: |
+          sudo rm -rf apps/desktop/release || true
+          sudo rm -rf apps/desktop/dist || true
+          sudo rm -rf /tmp/electron-builder* || true
+
+      # ✅ 设置版本号（格式：X.Y.Z-hardy.N）
+      - name: Set package version
+        run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} Hardy
+
+      # 未配置 MAC_CSC_LINK 时 electron-builder 自动跳过签名（identity=null），产物为未签名包
+      # 如需签名 + 公证，配置 MAC_CSC_LINK / MAC_CSC_KEY_PASSWORD / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+      - name: Build macOS App
+        run: npm run desktop:package:app
+        env:
+          UPDATE_CHANNEL: Hardy
+          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          APP_URL: http://localhost:3015
+          DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
+          KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
+          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_DESKTOP_PROJECT_ID }}
+          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL }}
+          # 可选：Apple 签名 / 公证
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: List release directory
+        run: |
+          echo "============================================================"
+          echo "  release 目录内容"
+          echo "============================================================"
+          if [ -d apps/desktop/release ]; then
+            ls -lh apps/desktop/release
+          else
+            echo "❌ release 目录不存在！"
+          fi
+          echo "============================================================"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-macos
+          path: apps/desktop/release/
+          retention-days: 3
+
+      # ⚠️ 三个平台 job 并发向同一个 tag 写 release（action 内部已处理 already_exists 竞态）
+      # 因此 body 文本必须与 build-windows / build-linux 完全一致，否则会出现随机覆盖
+      - name: Create Release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ needs.calculate-version.outputs.tag }}
+          name: ${{ needs.calculate-version.outputs.tag }}
+          body: |
+            ## 🔨 Hardy Build — ${{ needs.calculate-version.outputs.tag }}
+
+            > Custom build from `${{ env.SOURCE_BRANCH }}` branch of `${{ env.SOURCE_REPO }}`.
+
+            ### 🖥️ Platforms
+            Windows `*-setup.exe` · macOS arm64 `*.dmg` / `*.zip` · Linux `*.AppImage` / `*.deb` / `*.rpm` / `*.snap` / `*.tar.gz`
+            （实际产物取决于各平台构建结果）
+
+            ### ⚠️ Important Notes
+            - This is a custom hardy build and is NOT intended for production use.
+            - May contain unstable or incomplete changes. Use at your own risk.
+            - macOS 产物未签名、未公证：首次打开请「右键 → 打开」，或执行
+              `xattr -dr com.apple.quarantine "/Applications/LobeHub-Hardy.app"`。
+            - Linux 自动更新仅对 AppImage 生效，其他格式请手动重装。
+          files: |
+            apps/desktop/release/*.dmg*
+            apps/desktop/release/*.zip*
+            apps/desktop/release/latest*.yml
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # Linux 桌面端（x64，AppImage / deb / rpm / snap / tar.gz）
+  # ============================================================
+  build-linux:
+    name: Build Linux Desktop
+    runs-on: ubuntu-latest
+    needs: [calculate-version]
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: pnpm install --node-linker=hoisted
+
+      - name: Remove China electron mirror
+        shell: bash
+        run: |
+          if [ -f "./apps/desktop/.npmrc" ]; then
+            sed -i.bak '/^electron_mirror=/d; /^electron_builder_binaries_mirror=/d' "./apps/desktop/.npmrc"
+            rm -f "./apps/desktop/.npmrc.bak"
+          fi
+
+      - name: Install deps on Desktop
+        run: npm run install-isolated --prefix=./apps/desktop
+
+      - name: Clean previous build artifacts
+        run: |
+          sudo rm -rf apps/desktop/release || true
+          sudo rm -rf apps/desktop/dist || true
+
+      # ✅ 设置版本号（格式：X.Y.Z-hardy.N）
+      - name: Set package version
+        run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} Hardy
+
+      - name: Build Linux App
+        run: npm run desktop:package:app
+        env:
+          UPDATE_CHANNEL: Hardy
+          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          APP_URL: http://localhost:3015
+          DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
+          KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
+          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_DESKTOP_PROJECT_ID }}
+          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL }}
+
+      - name: List release directory
+        run: |
+          echo "============================================================"
+          echo "  release 目录内容"
+          echo "============================================================"
+          if [ -d apps/desktop/release ]; then
+            ls -lh apps/desktop/release
+          else
+            echo "❌ release 目录不存在！"
+          fi
+          echo "============================================================"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-linux
+          path: apps/desktop/release/
+          retention-days: 3
+
+      # ⚠️ body 文本必须与 build-windows / build-macos 完全一致（同一 tag 并发写）
+      - name: Create Release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ needs.calculate-version.outputs.tag }}
+          name: ${{ needs.calculate-version.outputs.tag }}
+          body: |
+            ## 🔨 Hardy Build — ${{ needs.calculate-version.outputs.tag }}
+
+            > Custom build from `${{ env.SOURCE_BRANCH }}` branch of `${{ env.SOURCE_REPO }}`.
+
+            ### 🖥️ Platforms
+            Windows `*-setup.exe` · macOS arm64 `*.dmg` / `*.zip` · Linux `*.AppImage` / `*.deb` / `*.rpm` / `*.snap` / `*.tar.gz`
+            （实际产物取决于各平台构建结果）
+
+            ### ⚠️ Important Notes
+            - This is a custom hardy build and is NOT intended for production use.
+            - May contain unstable or incomplete changes. Use at your own risk.
+            - macOS 产物未签名、未公证：首次打开请「右键 → 打开」，或执行
+              `xattr -dr com.apple.quarantine "/Applications/LobeHub-Hardy.app"`。
+            - Linux 自动更新仅对 AppImage 生效，其他格式请手动重装。
+          files: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb*
+            apps/desktop/release/*.rpm*
+            apps/desktop/release/*.snap*
+            apps/desktop/release/*.tar.gz*
+            apps/desktop/release/latest*.yml
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
