@@ -122,7 +122,7 @@ jobs:
           # build-args: |
           #   SHA=${{ steps.vars.outputs.sha_short }}
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag }}
+            ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag || 'latest' }}
             ${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.version }}
           # cache-from: type=gha
           # cache-to: type=gha,mode=max
@@ -166,7 +166,7 @@ jobs:
           fi
 
       - name: Install deps on Desktop
-        run: npm run install-isolated --prefix=./apps/desktop
+        run: npm run install-isolated --prefix=./apps/desktop -- --frozen-lockfile
 
       # ✅ 设置版本号（格式：X.Y.Z-hardy.N）
       - name: Set package version
@@ -176,12 +176,9 @@ jobs:
         run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: Hardy
-          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
           KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
-          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_DESKTOP_PROJECT_ID }}
-          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL }}
           TEMP: C:\temp
           TMP: C:\temp
 
@@ -227,7 +224,7 @@ jobs:
               `xattr -dr com.apple.quarantine "/Applications/LobeHub-Hardy.app"`。
             - Linux 自动更新仅对 AppImage 生效，其他格式请手动重装。
           files: |
-            apps/desktop/release/*-setup.exe
+            apps/desktop/release/*.exe*
             apps/desktop/release/latest*.yml 
           prerelease: false
         env:
@@ -275,7 +272,7 @@ jobs:
           fi
 
       - name: Install deps on Desktop
-        run: npm run install-isolated --prefix=./apps/desktop
+        run: npm run install-isolated --prefix=./apps/desktop -- --frozen-lockfile
 
       # 清理构建残留，规避 electron-builder 在 macOS 上的 hdiutil 问题
       # https://github.com/electron-userland/electron-builder/issues/8415
@@ -295,12 +292,9 @@ jobs:
         run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: Hardy
-          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
           KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
-          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_DESKTOP_PROJECT_ID }}
-          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL }}
           # 可选：Apple 签名 / 公证
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -399,7 +393,7 @@ jobs:
           fi
 
       - name: Install deps on Desktop
-        run: npm run install-isolated --prefix=./apps/desktop
+        run: npm run install-isolated --prefix=./apps/desktop -- --frozen-lockfile
 
       - name: Clean previous build artifacts
         run: |
@@ -414,12 +408,9 @@ jobs:
         run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: Hardy
-          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
           KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
-          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_DESKTOP_PROJECT_ID }}
-          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL }}
 
       - name: List release directory
         run: |
