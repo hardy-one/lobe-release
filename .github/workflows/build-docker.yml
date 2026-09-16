@@ -1,0 +1,127 @@
+name: Build LobeChat (Docker)
+
+on:
+  workflow_dispatch:
+    inputs:
+      docker_tag:
+        description: 'Docker tag'
+        required: false
+        type: string
+        default: 'latest'
+
+      version:
+        description: 'Version number (e.g., 2.1.45-hardy.1)'
+        required: false
+        type: string
+
+      source_branch:
+        description: '选择要构建的分支：next、canary，或输入其他分支名'
+        required: false
+        default: 'next'
+        type: string
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
+  SOURCE_REPO: hardy-one/lobehub
+  SOURCE_BRANCH: ${{ github.event.inputs.source_branch || 'next' }}
+
+jobs:
+  calculate-version:
+    name: Calculate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      # ✅ 手动指定版本时使用
+      - name: Use manual version
+        if: ${{ inputs.version != '' && inputs.version != null }}
+        id: version_manual
+        run: |
+          echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+
+      # ✅ 自动计算版本：基于官方 lobehub 的 stable tag
+      - name: Calculate hardy version from official lobehub tags
+        if: ${{ inputs.version == '' || inputs.version == null }}
+        id: version_auto
+        run: |
+          # 从官方 lobehub/lobehub 获取最新 stable tag
+          response=$(curl -s "https://api.github.com/repos/lobehub/lobehub/tags?per_page=100")
+          latest_tag=$(echo "$response" | grep -oE '"name":\s*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/v\1/')
+
+          if [ -z "$latest_tag" ]; then
+            echo "❌ No stable tag found, using fallback"
+            version="2.1.45-hardy.${{ github.run_number }}"
+          else
+            echo "📌 Latest official stable tag: $latest_tag"
+
+            # 解析版本号
+            base_version="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "$base_version"
+
+            # 基于官方版本 +1 作为 hardy base
+            new_patch=$((patch + 1))
+            base_hardy="${major}.${minor}.${new_patch}"
+
+            # hardy 序号使用 run_number
+            version="${base_hardy}-hardy.${{ github.run_number }}"
+          fi
+
+          tag="v${version}"
+          echo "✅ Hardy version: ${version}"
+          echo "🏷️ Tag: ${tag}"
+          echo "version=${version}" >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+      - name: Set version output
+        id: version
+        run: |
+          if [ -n "${{ steps.version_manual.outputs.version }}" ]; then
+            echo "version=${{ steps.version_manual.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.version_manual.outputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ steps.version_auto.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.version_auto.outputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [calculate-version]
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # - name: Get commit SHA
+      #   id: vars
+      #   run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          # build-args: |
+          #   SHA=${{ steps.vars.outputs.sha_short }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag || 'latest' }}
+            ${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.version }}
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
