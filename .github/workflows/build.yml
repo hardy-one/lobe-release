@@ -51,28 +51,54 @@ jobs:
         if: ${{ inputs.version == '' || inputs.version == null }}
         id: version_auto
         run: |
-          # 从官方 lobehub/lobehub 获取最新 stable tag
-          response=$(curl -s "https://api.github.com/repos/lobehub/lobehub/tags?per_page=100")
-          latest_tag=$(echo "$response" | grep -oE '"name":\s*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/v\1/')
+          set -euo pipefail
+
+          # 用 git ls-remote 读取官方 tag 列表，不走 API，避免未认证请求被共享出口 IP 的限流影响
+          tags="$(git ls-remote --tags --refs https://github.com/lobehub/lobehub)" || {
+            echo "❌ Failed to fetch tags from lobehub/lobehub"
+            exit 1
+          }
+
+          # 只保留 X.Y.Z 形式的稳定 tag，按版本号排序取最大值（不依赖接口返回顺序）
+          latest_tag="$(printf '%s\n' "$tags" \
+            | sed 's#.*refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -1 || true)"
 
           if [ -z "$latest_tag" ]; then
-            echo "❌ No stable tag found, using fallback"
-            version="2.1.45-hardy.${{ github.run_number }}"
-          else
-            echo "📌 Latest official stable tag: $latest_tag"
-
-            # 解析版本号
-            base_version="${latest_tag#v}"
-            IFS='.' read -r major minor patch <<< "$base_version"
-
-            # 基于官方版本 +1 作为 hardy base
-            new_patch=$((patch + 1))
-            base_hardy="${major}.${minor}.${new_patch}"
-
-            # hardy 序号使用 run_number
-            version="${base_hardy}-hardy.${{ github.run_number }}"
+            echo "❌ No stable tag found from lobehub/lobehub"
+            exit 1
           fi
 
+          echo "📌 Latest official stable tag: $latest_tag"
+
+          # 解析版本号
+          base_version="${latest_tag#v}"
+          IFS='.' read -r major minor patch <<< "$base_version"
+
+          # 基于官方版本 +1 作为 hardy base
+          new_patch=$((patch + 1))
+          base_hardy="${major}.${minor}.${new_patch}"
+
+          # hardy 序号取同一 base 版本下已有 tag 的最大值 +1，不用 run_number。
+          # run_number 跟随 workflow 文件，文件拆合或改名都会归零，导致版本号倒退。
+          own_tags="$(git ls-remote --tags --refs "https://github.com/${{ github.repository }}.git")" || {
+            echo "❌ Failed to fetch tags from ${{ github.repository }}"
+            exit 1
+          }
+
+          base_re="${base_hardy//./\\.}"
+          last_seq="$(printf '%s\n' "$own_tags" \
+            | sed 's#.*refs/tags/##' \
+            | grep -E "^v${base_re}-hardy\.[0-9]+$" \
+            | sed 's/.*-hardy\.//' \
+            | sort -n \
+            | tail -1 || true)"
+
+          next_seq="$(( ${last_seq:-0} + 1 ))"
+
+          version="${base_hardy}-hardy.${next_seq}"
           tag="v${version}"
           echo "✅ Hardy version: ${version}"
           echo "🏷️ Tag: ${tag}"
